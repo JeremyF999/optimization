@@ -1,0 +1,85 @@
+---
+title: "code"
+author: '111'
+date: "2024-10-24"
+output: html_document
+---
+
+```{r}
+setwd("/Users/jeremyfang/Downloads/optimization")
+
+# 加载必要的库
+library(dplyr)
+library(ompr)
+library(ompr.roi)
+library(ROI)
+library(ROI.plugin.glpk)
+library(ggplot2)
+
+# 读取需求数据和邻接矩阵
+data <- read.csv("data_new.csv")
+W <- as.matrix(read.csv("W.csv", header = TRUE))
+
+# 定义模型参数
+N <- nrow(data) # 栅格总数
+P <- 100 # 要选址的充电站数量
+
+# 构建最大覆盖模型
+model <- MIPModel() %>%
+  add_variable(y[j], j = 1:N, type = "binary") %>%  # 充电站选址变量
+  add_variable(z[i], i = 1:N, type = "binary") %>%  # 需求是否被覆盖的变量
+  set_objective(sum_expr(data$lambda[i] * z[i], i = 1:N), "max") %>%  # 目标是最大化需求覆盖
+  add_constraint(sum_expr(y[j], j = 1:N) == P)  # 选址数量为P个充电站
+
+# 为每个栅格添加邻接约束
+for (i in 1:N) {
+  neighbors <- which(W[i, ] == 1)  # 找到与栅格i相邻的栅格
+  if (length(neighbors) > 0) {
+    model <- add_constraint(model, sum_expr(y[j], j = neighbors) >= z[i])  # 如果栅格有相邻节点，则满足需求的条件
+  } else {
+    model <- add_constraint(model, z[i] == 0)  # 如果没有邻居节点，需求不能被满足
+  }
+}
+
+# 求解模型
+solution <- solve_model(model, with_ROI(solver = "glpk"))
+
+# 提取充电站选址和需求覆盖的解决方案
+y_solution <- get_solution(solution, y[j])
+z_solution <- get_solution(solution, z[i])
+
+# 将选址结果加入到原始数据中
+data$selected <- y_solution$value
+
+# 可视化充电站选址结果
+ggplot(data) +
+  geom_point(aes(x = ID, y = lambda, color = selected)) +
+  labs(title = "Optimal Charging Station Locations",
+       x = "Grid ID",
+       y = "Demand (lambda)",
+       color = "Selected")
+
+# 核密度分析图
+ggplot(data, aes(x = log_Population, y = lambda)) +
+  geom_density_2d() +
+  labs(title = "Kernel Density Plot of Charging Station Demand",
+       x = "Log Population",
+       y = "Demand (lambda)")
+
+# 边际需求增长线图
+charging_stations <- seq(40, 400, by = 10)
+marginal_demand_covered <- sapply(charging_stations, function(P) {
+  temp_model <- model %>%
+    add_constraint(sum_expr(y[j], j = 1:N) == P)  # 更新选址数量为当前值
+  temp_solution <- solve_model(temp_model, with_ROI(solver = "glpk"))
+  sum(get_solution(temp_solution, z[i])$value)
+})
+
+ggplot(data.frame(charging_stations, marginal_demand_covered), aes(x = charging_stations, y = marginal_demand_covered)) +
+  geom_line() +
+  labs(title = "Marginal Increase in Demand Covered",
+       x = "Number of Charging Stations",
+       y = "Marginal Demand Covered")
+
+```
+

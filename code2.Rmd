@@ -1,0 +1,96 @@
+---
+title: "code2"
+author: '111'
+date: "2024-10-24"
+output: html_document
+---
+
+```{r}
+# 设置工作目录
+setwd("/Users/jeremyfang/Downloads/optimization")
+
+# 加载必要的库
+library(dplyr)
+library(ompr)
+library(ompr.roi)
+library(ROI)
+library(ROI.plugin.glpk)
+library(ggplot2)
+library(sf)
+
+# 读取需求数据和邻接矩阵
+data <- read.csv("data_new.csv")
+W <- as.matrix(read.csv("W.csv", header = TRUE, check.names = FALSE))
+
+# 确保 lambda 是数值型，且处理 NA 值
+data$lambda <- as.numeric(data$lambda)
+data$lambda[is.na(data$lambda)] <- 0
+
+# 定义模型参数
+N <- nrow(data)  # 栅格总数
+P <- 100         # 要选址的充电站数量
+
+# 构建最大覆盖模型
+model <- MIPModel() %>%
+  add_variable(y[j], j = 1:N, type = "binary") %>%  # 充电站选址变量
+  add_variable(z[i], i = 1:N, type = "binary") %>%  # 需求是否被覆盖的变量
+  set_objective(sum_expr(data$lambda[i] * z[i], i = 1:N), sense = "max") %>%  # 最大化需求覆盖
+  add_constraint(sum_expr(y[j], j = 1:N) == P)  # 选址数量为 P 个充电站
+
+# 为每个栅格添加邻接约束
+for (i in 1:N) {
+  neighbors <- which(W[i, ] == 1)  # 找到与栅格 i 相邻的栅格
+  if (length(neighbors) > 0) {
+    model <- add_constraint(model, sum_expr(y[j], j = neighbors) >= z[i])  # 有相邻节点时的约束
+  } else {
+    model <- add_constraint(model, z[i] == 0)  # 没有邻居节点时，需求无法被满足
+  }
+}
+
+# 求解模型
+solution <- solve_model(model, with_ROI(solver = "glpk"))
+
+# 提取充电站选址和需求覆盖的解决方案
+y_solution <- get_solution(solution, y[j])
+z_solution <- get_solution(solution, z[i])
+
+# 将解决方案加入到原始数据中
+data$selected <- y_solution$value
+
+# 可视化充电站选址结果
+data_sf <- st_as_sf(data, coords = c("longitude", "latitude"), crs = 4326)
+
+ggplot(data_sf) +
+  geom_sf(aes(color = as.factor(selected), shape = as.factor(selected)), size = 3) +
+  scale_color_manual(values = c("0" = "blue", "1" = "red"), labels = c("Not Selected", "Selected")) +
+  scale_shape_manual(values = c(16, 17), labels = c("Not Selected", "Selected")) +
+  theme_minimal() +
+  labs(title = "Optimal Charging Station Locations",
+       color = "Charging Station Status",
+       shape = "Charging Station Status") +
+  theme(legend.position = "right")
+
+# 核密度分析图
+ggplot(data, aes(x = log_Population, y = lambda)) +
+  geom_density_2d() +
+  labs(title = "Kernel Density Plot of Charging Station Demand",
+       x = "Log Population",
+       y = "Demand (lambda)")
+
+# 边际需求增长线图
+charging_stations <- seq(40, 400, by = 10)
+marginal_demand_covered <- sapply(charging_stations, function(P) {
+  temp_model <- model %>%
+    add_constraint(sum_expr(y[j], j = 1:N) == P)  # 更新选址数量为当前值
+  temp_solution <- solve_model(temp_model, with_ROI(solver = "glpk"))
+  sum(get_solution(temp_solution, z[i])$value)
+})
+
+ggplot(data.frame(charging_stations, marginal_demand_covered), aes(x = charging_stations, y = marginal_demand_covered)) +
+  geom_line() +
+  labs(title = "Marginal Increase in Demand Covered",
+       x = "Number of Charging Stations",
+       y = "Marginal Demand Covered")
+
+```
+

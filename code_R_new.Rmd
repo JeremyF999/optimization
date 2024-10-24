@@ -1,0 +1,52 @@
+
+
+```{r}
+setwd("C:/Users/芊芊/Documents/chargingstation")
+```
+
+
+```{r}
+library(ggplot2)
+library(sf)
+library(dplyr)
+
+```
+
+
+```{r}
+data <- read.csv("C:/Users/芊芊/Documents/chargingstation/data.csv")
+```
+
+```{r}
+data_sf <- st_as_sf(data, coords = c("longitude", "latitude"), crs = 4326)
+```
+
+```{r}
+# 可视化 y50 和 z50
+ggplot(data_sf) +
+  geom_sf(aes(color = y100, shape = as.factor(z100)), size = 3) + # y50 为颜色, z50 为形状
+  scale_color_gradient(low = "blue", high = "red") + # y50 的颜色渐变
+  scale_shape_manual(values = c(16, 17), # 设置不同形状
+                     labels = c("Not Satisfied", "Satisfied")) + # 标签
+  theme_minimal() +
+  labs(title = "Visualization of y50 and z50 by Location",
+       color = "y100 Value",
+       shape = "z50 Status") + # 图例标题
+  theme(legend.position = "right")
+
+```
+
+
+```{r}
+# 可视化 y50
+ggplot(data_sf) +
+  geom_sf(aes(color = y70)) + # 使用 y50 列作为颜色
+  scale_color_gradient(low = "blue", high = "red") + # 设定颜色渐变
+  theme_minimal() +
+  labs(title = "Visualization of y70 by Location",
+       color = "y70 Value") +
+  theme(legend.position = "right")
+
+
+```
+
